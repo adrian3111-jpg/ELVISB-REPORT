@@ -13,3 +13,4 @@
 .toast{position:fixed;left:50%;bottom:25px;transform:translateX(-50%);background:#222;color:#fff;padding:10px 15px;border-radius:22px;z-index:300;display:none;max-width:90%;text-align:center}.toast.show{display:block}
 @media(max-width:600px){.shell{padding:8px}.choices{grid-template-columns:1fr}.layoutGrid{grid-template-columns:1fr 1fr}.item img{max-height:420px}}
 @media print{body{background:#fff}.appbar,.shell,.fab,.modal,.camera,.toast{display:none!important}#pdfStage{display:block!important}.pdfPage{margin:0;box-shadow:none}@page{size:A4;margin:0}}
+.pdfMode .appbar,.pdfMode .shell,.pdfMode .fab,.pdfMode .modal,.pdfMode .camera,.pdfMode .toast{display:none!important}.pdfMode #pdfStage{display:block!important}.pdfMode{background:#fff}
