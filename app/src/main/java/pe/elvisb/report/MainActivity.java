@@ -64,7 +64,7 @@ public class MainActivity extends Activity {
         try {
             String html = readAsset("index.html");
             html = html.replace("</head>", "<script>window.__ELVISB_ANDROID__=true;</script></head>");
-            web.loadDataWithBaseURL("https://localhost/", html, "text/html", "UTF-8", null);
+            web.loadDataWithBaseURL("file:///android_asset/", html, "text/html", "UTF-8", null);
         } catch (Exception e) {
             Toast.makeText(this, "No se pudo iniciar ELVISB Report: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
