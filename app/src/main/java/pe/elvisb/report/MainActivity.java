@@ -5,15 +5,12 @@ import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.graphics.Canvas;
+import android.graphics.Picture;
+import android.graphics.pdf.PdfDocument;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.CancellationSignal;
-import android.os.ParcelFileDescriptor;
-import android.print.PageRange;
-import android.print.PrintAttributes;
-import android.print.PrintDocumentAdapter;
-import android.print.PrintDocumentInfo;
 import android.webkit.JsPromptResult;
 import android.webkit.PermissionRequest;
 import android.webkit.ValueCallback;
@@ -27,6 +24,7 @@ import androidx.core.content.FileProvider;
 
 import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 
@@ -120,87 +118,71 @@ public class MainActivity extends Activity {
 
     private void generatePdf(String requestedName) {
         final String safeName = safePdfName(requestedName);
+
+        web.evaluateJavascript(
+                "window.elvisbPreparePdf ? window.elvisbPreparePdf() : '0'",
+                value -> web.postDelayed(() -> writePdfFromWebView(safeName), 650)
+        );
+    }
+
+    @SuppressWarnings("deprecation")
+    private void writePdfFromWebView(String safeName) {
         final File outFile = pdfFile(safeName);
 
         try {
-            final ParcelFileDescriptor pfd = ParcelFileDescriptor.open(
-                    outFile,
-                    ParcelFileDescriptor.MODE_CREATE |
-                            ParcelFileDescriptor.MODE_TRUNCATE |
-                            ParcelFileDescriptor.MODE_READ_WRITE
-            );
+            Picture picture = web.capturePicture();
+            int contentWidth = Math.max(1, picture.getWidth());
+            int contentHeight = Math.max(1, picture.getHeight());
 
-            final PrintDocumentAdapter adapter = web.createPrintDocumentAdapter(safeName);
+            final int pageWidth = 595;
+            final int pageHeight = 842;
+            float scale = (float) pageWidth / (float) contentWidth;
+            int scaledHeight = Math.max(1, Math.round(contentHeight * scale));
+            int pageCount = Math.max(1, (int) Math.ceil(scaledHeight / (double) pageHeight));
 
-            PrintAttributes attrs = new PrintAttributes.Builder()
-                    .setMediaSize(PrintAttributes.MediaSize.ISO_A4)
-                    .setResolution(new PrintAttributes.Resolution("elvisb", "ELVISB", 300, 300))
-                    .setMinMargins(PrintAttributes.Margins.NO_MARGINS)
-                    .build();
+            PdfDocument document = new PdfDocument();
 
-            CancellationSignal signal = new CancellationSignal();
+            for (int i = 0; i < pageCount; i++) {
+                PdfDocument.PageInfo info = new PdfDocument.PageInfo.Builder(
+                        pageWidth, pageHeight, i + 1
+                ).create();
 
-            adapter.onLayout(
-                    null,
-                    attrs,
-                    signal,
-                    new PrintDocumentAdapter.LayoutResultCallback() {
-                        @Override
-                        public void onLayoutFinished(PrintDocumentInfo info, boolean changed) {
-                            adapter.onWrite(
-                                    new PageRange[]{PageRange.ALL_PAGES},
-                                    pfd,
-                                    new CancellationSignal(),
-                                    new PrintDocumentAdapter.WriteResultCallback() {
-                                        @Override
-                                        public void onWriteFinished(PageRange[] pages) {
-                                            try { pfd.close(); } catch (Exception ignored) {}
-                                            adapter.onFinish();
-                                            runOnUiThread(() -> web.evaluateJavascript(
-                                                    "window.onNativePdfReady && window.onNativePdfReady(" +
-                                                            jsQuote(safeName + ".pdf") + ");",
-                                                    null
-                                            ));
-                                        }
+                PdfDocument.Page page = document.startPage(info);
+                Canvas canvas = page.getCanvas();
 
-                                        @Override
-                                        public void onWriteFailed(CharSequence error) {
-                                            try { pfd.close(); } catch (Exception ignored) {}
-                                            adapter.onFinish();
-                                            String msg = error == null ? "Error al generar PDF" : error.toString();
-                                            runOnUiThread(() -> {
-                                                Toast.makeText(MainActivity.this, msg, Toast.LENGTH_LONG).show();
-                                                web.evaluateJavascript(
-                                                        "window.onNativePdfError && window.onNativePdfError(" +
-                                                                jsQuote(msg) + ");",
-                                                        null
-                                                );
-                                            });
-                                        }
-                                    }
-                            );
-                        }
+                canvas.save();
+                canvas.scale(scale, scale);
+                float sourcePageHeight = pageHeight / scale;
+                canvas.translate(0, -i * sourcePageHeight);
+                picture.draw(canvas);
+                canvas.restore();
 
-                        @Override
-                        public void onLayoutFailed(CharSequence error) {
-                            try { pfd.close(); } catch (Exception ignored) {}
-                            adapter.onFinish();
-                            String msg = error == null ? "No se pudo preparar el PDF" : error.toString();
-                            Toast.makeText(MainActivity.this, msg, Toast.LENGTH_LONG).show();
-                            web.evaluateJavascript(
-                                    "window.onNativePdfError && window.onNativePdfError(" + jsQuote(msg) + ");",
-                                    null
-                            );
-                        }
-                    },
+                document.finishPage(page);
+            }
+
+            FileOutputStream out = new FileOutputStream(outFile);
+            document.writeTo(out);
+            out.flush();
+            out.close();
+            document.close();
+
+            web.evaluateJavascript("window.elvisbFinishPdf && window.elvisbFinishPdf()", null);
+
+            runOnUiThread(() -> web.evaluateJavascript(
+                    "window.onNativePdfReady && window.onNativePdfReady(" +
+                            jsQuote(safeName + ".pdf") + ");",
                     null
-            );
+            ));
         } catch (Exception e) {
-            Toast.makeText(this, "No se pudo generar el PDF: " + e.getMessage(), Toast.LENGTH_LONG).show();
-            web.evaluateJavascript(
-                    "window.onNativePdfError && window.onNativePdfError(" + jsQuote(e.getMessage()) + ");",
-                    null
-            );
+            web.evaluateJavascript("window.elvisbFinishPdf && window.elvisbFinishPdf()", null);
+            String msg = e.getMessage() == null ? "No se pudo generar el PDF" : e.getMessage();
+            runOnUiThread(() -> {
+                Toast.makeText(MainActivity.this, msg, Toast.LENGTH_LONG).show();
+                web.evaluateJavascript(
+                        "window.onNativePdfError && window.onNativePdfError(" + jsQuote(msg) + ");",
+                        null
+                );
+            });
         }
     }
 
